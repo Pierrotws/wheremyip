@@ -45,6 +45,15 @@ developing:
 journalctl -f -o cat /usr/bin/gnome-shell
 ```
 
+## Package for extensions.gnome.org
+
+```sh
+make pack
+```
+
+Produces `wheremyip@pierrotws.github.com.shell-extension.zip` in the repo
+root, ready to upload at https://extensions.gnome.org/upload/.
+
 ## License
 
 See [LICENSE](LICENSE).

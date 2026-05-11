@@ -28,7 +28,10 @@ reload: install
 	@gnome-extensions enable $(UUID)
 
 pack:
-	@gnome-extensions pack --force --extra-source=stylesheet.css .
+	@rm -f $(UUID).shell-extension.zip
+	@gnome-extensions pack --force .
+	@echo "Built $(UUID).shell-extension.zip"
+	@echo "Upload at https://extensions.gnome.org/upload/"
 
 clean:
 	@rm -f $(UUID).shell-extension.zip
