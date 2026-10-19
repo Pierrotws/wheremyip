@@ -2,7 +2,7 @@
   "uuid": "wheremyip@pierrotws.github.com",
   "name": "Where My IP",
   "description": "Shows the country flag of your current public IP address in the top panel. Click for details (IP, country, city, ISP). Refreshes on network change.",
-  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
   "url": "https://github.com/Pierrotws/wheremyip",
   "version": 1,
   "settings-schema": null
