@@ -59,6 +59,16 @@ make pack
 Produces `wheremyip@pierrotws.github.com.shell-extension.zip` in the repo
 root, ready to upload at https://extensions.gnome.org/upload/.
 
+## Releasing
+
+Releases are handled by [release-please](https://github.com/googleapis/release-please).
+Write commits using [Conventional Commits](https://www.conventionalcommits.org/)
+(`fix:`, `feat:`, `feat!:` …). On every push to `main`, release-please opens or
+updates a release PR that bumps `version` in `metadata.json` to the next
+integer (1, 2, 3, …) and updates `CHANGELOG.md`. Merging that PR tags the
+release (`v2.0.0`, `v3.0.0`, …), publishes it on GitHub and attaches the packed
+`.shell-extension.zip`.
+
 ## License
 
 See [LICENSE](LICENSE).

@@ -29,7 +29,7 @@ reload: install
 
 pack:
 	@rm -f $(UUID).shell-extension.zip
-	@gnome-extensions pack --force .
+	@zip -qX $(UUID).shell-extension.zip $(FILES)
 	@echo "Built $(UUID).shell-extension.zip"
 	@echo "Upload at https://extensions.gnome.org/upload/"
 
