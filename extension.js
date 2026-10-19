@@ -11,9 +11,79 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 const REFRESH_INTERVAL_SECONDS = 600;
-const API_URL = 'https://ipapi.co/json/';
 const REGIONAL_INDICATOR_A = 0x1F1E6;
 const ASCII_A = 'A'.charCodeAt(0);
+
+// Tried in turn until one answers: VPN DNS filters (e.g. NordVPN Threat
+// Protection) blocklist some of these, and free tiers rate-limit shared VPN IPs.
+// Each parse() normalizes the response to {ip, countryCode, countryName, city, region, isp}.
+const PROVIDERS = [
+    {
+        url: 'https://ipapi.co/json/',
+        parse: d => {
+            if (d.error)
+                throw new Error(d.reason || _('API error'));
+            return {
+                ip: d.ip,
+                countryCode: d.country_code || d.country,
+                countryName: d.country_name,
+                city: d.city,
+                region: d.region,
+                isp: d.org || d.asn,
+            };
+        },
+    },
+    {
+        url: 'https://ipwho.is/',
+        parse: d => {
+            if (!d.success)
+                throw new Error(d.message || _('API error'));
+            return {
+                ip: d.ip,
+                countryCode: d.country_code,
+                countryName: d.country,
+                city: d.city,
+                region: d.region,
+                isp: d.connection?.isp || d.connection?.org,
+            };
+        },
+    },
+    {
+        url: 'https://ipinfo.io/json',
+        parse: d => {
+            if (d.error)
+                throw new Error(d.error.message || _('API error'));
+            return {
+                ip: d.ip,
+                countryCode: d.country,
+                city: d.city,
+                region: d.region,
+                isp: d.org?.replace(/^AS\d+\s+/, ''),
+            };
+        },
+    },
+    {
+        url: 'https://get.geojs.io/v1/ip/geo.json',
+        parse: d => ({
+            ip: d.ip,
+            countryCode: d.country_code,
+            countryName: d.country,
+            city: d.city,
+            region: d.region,
+            isp: d.organization_name || d.organization,
+        }),
+    },
+];
+
+Gio._promisify(Soup.Session.prototype, 'send_and_read_async');
+
+function countryCodeToName(code) {
+    try {
+        return new Intl.DisplayNames(['en'], {type: 'region'}).of(code);
+    } catch {
+        return '';
+    }
+}
 
 function countryCodeToFlag(code) {
     if (!code || code.length !== 2)
@@ -33,6 +103,7 @@ class WhereMyIpIndicator extends PanelMenu.Button {
         super._init(0.0, _('Where My IP'));
 
         this._lastIp = '';
+        this._providerIndex = 0;
         this._cancellable = null;
         this._timeoutId = 0;
         this._netDebounceId = 0;
@@ -111,62 +182,74 @@ class WhereMyIpIndicator extends PanelMenu.Button {
         );
     }
 
-    _refresh() {
+    async _refresh() {
         if (!this._networkMonitor.network_available) {
             this._setOffline();
             return;
         }
         if (this._cancellable)
             this._cancellable.cancel();
-        this._cancellable = new Gio.Cancellable();
+        const cancellable = new Gio.Cancellable();
+        this._cancellable = cancellable;
 
-        const message = Soup.Message.new('GET', API_URL);
-        message.request_headers.append('Accept', 'application/json');
-
-        this._httpSession.send_and_read_async(
-            message,
-            GLib.PRIORITY_DEFAULT,
-            this._cancellable,
-            (session, result) => {
-                let bytes;
-                try {
-                    bytes = session.send_and_read_finish(result);
-                } catch (e) {
-                    if (!(e instanceof GLib.Error && e.matches(Gio.io_error_quark(), Gio.IOErrorEnum.CANCELLED)))
-                        this._setError(_('Network error'));
+        // Start from the provider that last worked so a blocked one isn't retried every time.
+        let lastError;
+        for (let i = 0; i < PROVIDERS.length; i++) {
+            const index = (this._providerIndex + i) % PROVIDERS.length;
+            try {
+                const info = await this._query(PROVIDERS[index], cancellable);
+                this._providerIndex = index;
+                this._updateUI(info);
+                return;
+            } catch (e) {
+                if (cancellable.is_cancelled())
                     return;
-                }
-                const status = message.get_status();
-                if (status !== Soup.Status.OK) {
-                    this._setError(`HTTP ${status}`);
-                    return;
-                }
-                try {
-                    const text = new TextDecoder('utf-8').decode(bytes.get_data());
-                    const data = JSON.parse(text);
-                    if (data.error) {
-                        this._setError(data.reason || _('API error'));
-                        return;
-                    }
-                    this._updateUI(data);
-                } catch (e) {
-                    this._setError(_('Parse error'));
-                }
-            },
-        );
+                const detail = e.cause ? `: ${e.cause.message}` : '';
+                console.warn(`wheremyip: ${PROVIDERS[index].url}: ${e.message}${detail}`);
+                lastError = e;
+            }
+        }
+        this._setError(lastError.message);
     }
 
-    _updateUI(data) {
-        this._lastIp = data.ip || '';
-        const code = data.country_code || data.country || '';
+    async _query(provider, cancellable) {
+        const message = Soup.Message.new('GET', provider.url);
+        message.request_headers.append('Accept', 'application/json');
+
+        let bytes;
+        try {
+            bytes = await this._httpSession.send_and_read_async(
+                message, GLib.PRIORITY_DEFAULT, cancellable);
+        } catch (e) {
+            throw new Error(_('Network error'), {cause: e});
+        }
+        const status = message.get_status();
+        if (status !== Soup.Status.OK)
+            throw new Error(`HTTP ${status}`);
+
+        let data;
+        try {
+            data = JSON.parse(new TextDecoder('utf-8').decode(bytes.get_data()));
+        } catch {
+            throw new Error(_('Parse error'));
+        }
+        const info = provider.parse(data);
+        if (!info.ip)
+            throw new Error(_('Parse error'));
+        return info;
+    }
+
+    _updateUI(info) {
+        this._lastIp = info.ip;
+        const code = info.countryCode || '';
         this._flagLabel.text = countryCodeToFlag(code);
-        this._ipItem.label.text = _('IP: ') + (data.ip || '—');
-        const countryName = data.country_name || code || '—';
+        this._ipItem.label.text = _('IP: ') + info.ip;
+        const countryName = info.countryName || countryCodeToName(code) || code || '—';
         this._countryItem.label.text = _('Country: ') + (code ? `${countryName} (${code})` : countryName);
-        const city = data.city || '—';
-        const region = data.region ? `, ${data.region}` : '';
+        const city = info.city || '—';
+        const region = info.region ? `, ${info.region}` : '';
         this._cityItem.label.text = _('City: ') + city + region;
-        this._ispItem.label.text = _('ISP: ') + (data.org || data.asn || '—');
+        this._ispItem.label.text = _('ISP: ') + (info.isp || '—');
     }
 
     _setOffline() {

@@ -12,7 +12,12 @@ Click the flag for details: IP address, country, city/region, and ISP. Includes
 - A font with regional-indicator glyph coverage (e.g. `noto-fonts-emoji` /
   `fonts-noto-color-emoji`) so the flag renders as an actual flag rather than two
   letters.
-- Internet access. Geolocation uses the free [ipapi.co](https://ipapi.co) endpoint.
+- Internet access. Geolocation uses free endpoints, tried in turn until one
+  answers: [ipapi.co](https://ipapi.co), [ipwho.is](https://ipwho.is),
+  [ipinfo.io](https://ipinfo.io) and [geojs.io](https://www.geojs.io). This
+  keeps it working behind VPNs whose DNS filtering blocks some of them (e.g.
+  NordVPN Threat Protection blocks ipapi.co). Failures are logged to the
+  GNOME Shell journal.
 
 ## Install
 
